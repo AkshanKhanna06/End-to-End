@@ -1,0 +1,66 @@
+// Docker Username set kar diya gaya hai: akkicasm06
+// Final fix applied for Windows 'bat' command and UUID credentials
+pipeline {
+    agent any
+    environment {
+        DOCKER_IMAGE = "akkicasm06/cloud-native-test-app"
+        IMAGE_TAG = "${env.BUILD_ID}"
+        HELM_CHART_PATH = "helm/app-chart"
+    }
+    stages {
+        stage('1. Code Checkout') { steps { echo "Code checkout done." } }
+
+        stage('2. Build Image') {
+            steps {
+                dir('test-app') { bat "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} ." }
+            }
+        }
+
+        stage('3. Push Image to Docker Hub') {
+            steps {
+                // Triple quotes (''') mein UUID fix applied hai
+                withCredentials([usernamePassword(credentialsId: '''5ead5699-f937-4fbe-9ceb-3dab4fab56024''', passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
+                    bat "docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}"
+                    echo "Image Docker Hub par push ki ja rahi hai."
+                    bat "docker push ${DOCKER_IMAGE}:${IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('4. Helm Lint') {
+            steps {
+                echo "Helm chart ki syntax (lint) checking ho rahi hai."
+                // Helm Lint/Chart.yaml fix: dir mein jaakar run karein
+                dir('helm/app-chart') {
+                    bat "helm lint ."
+                }
+            }
+        }
+
+        stage('5. Deploy Observability & App') {
+            steps {
+                echo "--- Deploying Loki Stack (Prometheus, Loki, Grafana) ---"
+                // 1. Loki stack repo add karein
+                bat "helm repo add loki https://grafana.github.io/helm-charts --force-update"
+                
+                // 2. Loki Stack (Prometheus, Grafana, Promtail/Fluentd) ko install karein
+                bat """
+                helm upgrade --install loki-stack loki/loki-stack ^
+                --set grafana.enabled=true ^
+                --set prometheus.enabled=true ^
+                --set promtail.enabled=true ^
+                --wait --timeout 5m
+                """
+                
+                echo "--- Deploying Custom Test Application ---"
+                // 3. Custom App deploy karein
+                bat """
+                helm upgrade --install test-app-release ${HELM_CHART_PATH} ^
+                --set image.repository=${DOCKER_IMAGE} ^
+                --set image.tag=${IMAGE_TAG} ^
+                --wait --timeout 5m
+                """
+            }
+        }
+    }
+}

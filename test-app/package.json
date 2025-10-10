@@ -1,0 +1,6 @@
+{
+  "name": "cloud-native-test-app",
+  "version": "1.0.0",
+  "scripts": { "start": "node index.js" },
+  "dependencies": { "express": "^4.18.2", "prom-client": "^14.2.0" }
+}
