@@ -19,7 +19,7 @@ pipeline {
         stage('3. Push Image to Docker Hub') {
             steps {
                 // Triple quotes (''') mein UUID fix applied hai
-                withCredentials([usernamePassword(credentialsId: '''docker-akki-final''', passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
+                withCredentials([usernamePassword(credentialsId: '''5ead5699-f937-4fbe-9ceb-3dab4fab56024''', passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
                     bat "docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}"
                     echo "Image Docker Hub Push."
                     bat "docker push ${DOCKER_IMAGE}:${IMAGE_TAG}"
@@ -40,10 +40,12 @@ pipeline {
         stage('4.5. Kubeconfig Setup') {
             steps {
                 echo "Setting KUBECONFIG variable for Windows/Minikube authentication..."
-                // Windows user ke liye Kubeconfig file ka default path set karein.
-                // Jenkins is file ko use karke Minikube cluster se connect karega.
+                // KUBECONFIG variable ko set karke 'bat' command chalao
                 withEnv(['KUBECONFIG=C:\\Users\\aksha\\.kube\\config']) {
                     bat "minikube update-context"
+                }
+                // Nayi Kubeconfig set hone ke baad context ko finalise karein
+                bat "minikube profile minikube"
             }
         }
 
@@ -62,7 +64,7 @@ pipeline {
                 --wait --timeout 5m
                 """
                 
-                echo "--- Deploying Custom Test Application ---"
+                echo "--- Deploying Custom Test Application ---\n"
                 // 3. Custom App deploy karein
                 bat """
                 helm upgrade --install test-app-release ${HELM_CHART_PATH} ^
