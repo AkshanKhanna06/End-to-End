@@ -39,9 +39,11 @@ pipeline {
 
         stage('4.5. Kubeconfig Setup') {
             steps {
-                echo "Setting KUBECONFIG for Minikube access..."
-                // Minikube ko batane ke liye ki Jenkins context use kare
-                bat "minikube profile minikube"
+                echo "Setting KUBECONFIG variable for Windows/Minikube authentication..."
+                // Windows user ke liye Kubeconfig file ka default path set karein.
+                // Jenkins is file ko use karke Minikube cluster se connect karega.
+                withEnv(['KUBECONFIG=C:\\Users\\aksha\\.kube\\config']) {
+                    bat "minikube update-context"
             }
         }
 
