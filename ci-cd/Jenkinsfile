@@ -19,9 +19,9 @@ pipeline {
         stage('3. Push Image to Docker Hub') {
             steps {
                 // Triple quotes (''') mein UUID fix applied hai
-                withCredentials([usernamePassword(credentialsId: '''5ead5699-f937-4fbe-9ceb-3dab4fab56024''', passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
+                withCredentials([usernamePassword(credentialsId: '''docker-akki-final''', passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
                     bat "docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}"
-                    echo "Image Docker Hub par push ki ja rahi hai."
+                    echo "Image Docker Hub Push."
                     bat "docker push ${DOCKER_IMAGE}:${IMAGE_TAG}"
                 }
             }
