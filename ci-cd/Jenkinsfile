@@ -8,35 +8,35 @@ pipeline {
         HELM_CHART_PATH = "helm/app-chart"
     }
     stages {
-        stage('1. Code Checkout') { steps { echo "Code checkout done." } }
+        stage('1. Code Checkout') { 
+            steps { 
+                echo "Code checkout done." 
+            } 
+        }
 
         stage('2. Build Image') {
             steps {
-                dir('test-app') { bat "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} ." }
+                dir('test-app') { 
+                    bat "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} ."
+                }
             }
         }
 
         stage('3. Push Image to Docker Hub') {
             steps {
-                // Triple quotes (''') mein UUID fix applied hai
-                withCredentials([usernamePassword(credentialsId: '''5ead5699-f937-4fbe-9ceb-3dab4fab56024''', passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
+                // Triple quotes (''') mein UUID fix applied hai. Single quotes used for cleaner Groovy syntax.
+                withCredentials([usernamePassword(credentialsId: '5ead5699-f937-4fbe-9ceb-3dab4fab56024', passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
                     bat "docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}"
                     echo "Image Docker Hub Push."
                     bat "docker push ${DOCKER_IMAGE}:${IMAGE_TAG}"
                 }
             }
         }
-        // ... (After stage('3. Push Image to Docker Hub'))
 
         stage('3.5. Quality Assurance (Testing & Scanning)') {
             steps {
-                echo "--- TO BE IMPLEMENTED: Application Testing ---"
-                
-                
-                echo "--- TO BE IMPLEMENTED: Docker Image Vulnerability Scan ---"
-                
-                
-                
+                echo "--- TO BE IMPLEMENTED: Application Testing (e.g., npm test) ---"
+                echo "--- TO BE IMPLEMENTED: Docker Image Vulnerability Scan (e.g., Trivy) ---"
                 echo "Quality assurance stage complete. Proceeding to deployment."
             }
         }
@@ -44,27 +44,23 @@ pipeline {
         stage('4. Helm Lint') {
             steps {
                 echo "Helm chart ki syntax (lint) checking ho rahi hai."
-                // Helm Lint/Chart.yaml fix: dir mein jaakar run karein
                 dir('helm/app-chart') {
                     bat "helm lint ."
                 }
             }
         }
 
-// ... (content before Stage 4.5)
-
         stage('4.5. Kubeconfig Setup') {
             steps {
+                // Minikube profile/update commands removed. KUBECONFIG environment variable is set in the next stage.
                 echo "Kubeconfig path defined and environment variables are set for next stage."
-                // Failing minikube commands (update-context & profile minikube) removed.
-                // KUBECONFIG variable will be set in Stage 5 (Deploy) block.
             }
         }
 
         stage('5. Deploy Observability & App') {
-            // NEW: KUBECONFIG setting applied here, for Helm commands
-            withEnv(['KUBECONFIG=C:\\Users\\aksha\\.kube\\config']) {
-                steps {
+            steps { // <--- CRUCIAL FIX: withEnv must be inside the steps block
+                // KUBECONFIG variable set for the Helm commands
+                withEnv(['KUBECONFIG=C:\\Users\\aksha\\.kube\\config']) {
                     echo "--- Deploying Loki Stack (Prometheus, Loki, Grafana) ---"
                     // 1. Loki stack repo add karein
                     bat "helm repo add loki https://grafana.github.io/helm-charts --force-update"
