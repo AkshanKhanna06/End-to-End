@@ -73,29 +73,43 @@ pipeline {
             }
         }
 
-        stage('5. Deploy Observability & App') {
+        stage('5. Deploy Observability & App (ELK Stack)') {
             steps {
                 withEnv(['KUBECONFIG=C:\\Users\\aksha\\.kube\\config']) {
+                    echo "--- Ensuring Namespace ---"
                     bat "kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
 
+                    echo "--- Adding Helm Repositories ---"
+                    bat "helm repo add elastic https://helm.elastic.co --force-update"
+                    bat "helm repo add bitnami https://charts.bitnami.com/bitnami --force-update"
                     bat "helm repo add grafana https://grafana.github.io/helm-charts --force-update"
-                    bat "helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update"
                     bat "helm repo update"
 
+                    echo "--- Deploying Elasticsearch ---"
                     bat """
-                    helm upgrade --install loki grafana/loki ^
-                    -f helm/observability/loki-values.yaml ^
+                    helm upgrade --install elasticsearch elastic/elasticsearch ^
+                    -f helm/observability/elasticsearch-values.yaml ^
                     -n ${NAMESPACE} ^
                     --wait --timeout 10m
                     """
 
+                    echo "--- Deploying Fluentd ---"
                     bat """
-                    helm upgrade --install promtail grafana/promtail ^
-                    -f helm/observability/promtail-values.yaml ^
+                    helm upgrade --install fluentd bitnami/fluentd ^
+                    -f helm/observability/fluentd-values.yaml ^
                     -n ${NAMESPACE} ^
                     --wait --timeout 5m
                     """
 
+                    echo "--- Deploying Kibana ---"
+                    bat """
+                    helm upgrade --install kibana elastic/kibana ^
+                    -f helm/observability/kibana-values.yaml ^
+                    -n ${NAMESPACE} ^
+                    --wait --timeout 5m
+                    """
+
+                    echo "--- Deploying Grafana (optional metrics) ---"
                     bat """
                     helm upgrade --install grafana grafana/grafana ^
                     -f helm/observability/grafana-values.yaml ^
@@ -103,6 +117,7 @@ pipeline {
                     --wait --timeout 5m
                     """
 
+                    echo "--- Deploying Application ---"
                     bat """
                     helm upgrade --install test-app-release ${HELM_CHART_PATH} ^
                     --set image.repository=${DOCKER_IMAGE} ^
@@ -111,6 +126,7 @@ pipeline {
                     --wait --timeout 5m
                     """
 
+                    echo "--- ✅ Deployment Complete. Checking Pods ---"
                     bat "kubectl get pods -n ${NAMESPACE}"
                 }
             }

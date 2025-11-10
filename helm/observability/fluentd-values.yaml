@@ -1,5 +1,6 @@
 service:
   type: ClusterIP
+
 resources:
   requests:
     memory: "256Mi"
@@ -7,3 +8,23 @@ resources:
   limits:
     memory: "512Mi"
     cpu: "400m"
+
+# Custom output configuration to send logs to Elasticsearch
+configMaps:
+  output.conf: |
+    <match **>
+      @type elasticsearch
+      host elasticsearch-master
+      port 9200
+      logstash_format true
+      include_tag_key true
+      type_name _doc
+      reconnect_on_error true
+      reload_connections false
+      logstash_prefix fluentd
+      request_timeout 30s
+      <buffer>
+        flush_interval 10s
+        retry_forever true
+      </buffer>
+    </match>
