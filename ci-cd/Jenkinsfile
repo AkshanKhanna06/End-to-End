@@ -13,13 +13,14 @@ pipeline {
         IMAGE_TAG        = "${env.BUILD_ID}"
         HELM_CHART_PATH  = "helm/app-chart"
         NAMESPACE        = "observability"
+        KUBECONFIG_PATH  = "C:\\Users\\aksha\\.kube\\config"
     }
 
     stages {
 
         stage('1. Code Checkout') {
             steps {
-                echo "Code checkout done."
+                echo "✅ Code checkout done."
             }
         }
 
@@ -48,19 +49,15 @@ pipeline {
                         passwordVariable: 'DOCKER_PASS'
                     )]) {
 
-                        // --- DYNAMIC IMAGE NAME ---
                         def dynamicImage = "${DOCKER_USER}/cloud-native-test-app"
                         echo "🧩 Using dynamic image repository: ${dynamicImage}"
 
-                        // --- BUILD IMAGE ---
                         dir('test-app') {
                             bat "docker build -t ${dynamicImage}:${IMAGE_TAG} ."
                         }
 
-                        // --- LOGIN SECURELY ---
                         bat "echo %DOCKER_PASS% | docker login -u %DOCKER_USER% --password-stdin"
 
-                        // --- ENSURE REPO EXISTS (optional) ---
                         echo "📦 Ensuring repository exists..."
                         bat """
                         curl -u %DOCKER_USER%:%DOCKER_PASS% ^
@@ -70,11 +67,9 @@ pipeline {
                           https://hub.docker.com/v2/repositories/%DOCKER_USER%/
                         """
 
-                        // --- PUSH IMAGE ---
                         echo "🚀 Pushing image to Docker Hub..."
                         bat "docker push ${dynamicImage}:${IMAGE_TAG}"
 
-                        // --- UPDATE ENV VARIABLE FOR LATER STAGES ---
                         env.DOCKER_IMAGE = dynamicImage
                     }
                 }
@@ -90,11 +85,13 @@ pipeline {
         }
 
         stage('4. Deploy Observability & App (ELK Stack)') {
+            when {
+                expression { fileExists(env.KUBECONFIG_PATH) && bat(returnStatus: true, script: 'where kubectl') == 0 }
+            }
             steps {
-                withEnv(['KUBECONFIG=C:\\Users\\aksha\\.kube\\config']) {
-
+                withEnv(["KUBECONFIG=${env.KUBECONFIG_PATH}"]) {
                     echo "--- Ensuring Namespace ---"
-                    bat "kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
+                    bat "kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f - --validate=false"
 
                     echo "--- Adding Helm Repositories ---"
                     bat "helm repo add elastic https://helm.elastic.co --force-update"
@@ -147,6 +144,17 @@ pipeline {
                     bat "kubectl get pods -n ${NAMESPACE}"
                 }
             }
+            post {
+                unsuccessful {
+                    echo "⚠️ Deployment skipped or failed — cluster not configured or kubectl missing."
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "🏁 Pipeline finished."
         }
     }
 }
