@@ -10,7 +10,6 @@ pipeline {
     }
 
     environment {
-        DOCKER_IMAGE     = "akkicasm06/cloud-native-test-app"
         IMAGE_TAG        = "${env.BUILD_ID}"
         HELM_CHART_PATH  = "helm/app-chart"
         NAMESPACE        = "observability"
@@ -24,18 +23,10 @@ pipeline {
             }
         }
 
-        stage('2. Build Image') {
-            steps {
-                dir('test-app') {
-                    bat "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} ."
-                }
-            }
-        }
-
-        stage('3. Push Image to Docker Hub') {
+        stage('2. Build & Push Dynamic Docker Image') {
             steps {
                 script {
-                    // --- AUTO-DETECT DOCKER CREDENTIALS ---
+                    // --- AUTO-DETECT DOCKER CREDENTIAL ---
                     def dockerCred = params.DOCKER_CREDENTIALS
                     if (!dockerCred) {
                         def creds = Jenkins.instance
@@ -50,22 +41,47 @@ pipeline {
                         }
                     }
 
-                    // --- USE CREDENTIALS SECURELY ---
+                    // --- USE THOSE CREDENTIALS ---
                     withCredentials([usernamePassword(
                         credentialsId: dockerCred,
                         usernameVariable: 'DOCKER_USER',
                         passwordVariable: 'DOCKER_PASS'
                     )]) {
-                        echo "🔐 Logging in to Docker Hub..."
-                        bat "docker login -u %DOCKER_USER% -p %DOCKER_PASS%"
-                        echo "📦 Pushing image to Docker Hub..."
-                        bat "docker push ${DOCKER_IMAGE}:${IMAGE_TAG}"
+
+                        // --- DYNAMIC IMAGE NAME ---
+                        def dynamicImage = "${DOCKER_USER}/cloud-native-test-app"
+                        echo "🧩 Using dynamic image repository: ${dynamicImage}"
+
+                        // --- BUILD IMAGE ---
+                        dir('test-app') {
+                            bat "docker build -t ${dynamicImage}:${IMAGE_TAG} ."
+                        }
+
+                        // --- LOGIN SECURELY ---
+                        bat "echo %DOCKER_PASS% | docker login -u %DOCKER_USER% --password-stdin"
+
+                        // --- ENSURE REPO EXISTS (optional) ---
+                        echo "📦 Ensuring repository exists..."
+                        bat """
+                        curl -u %DOCKER_USER%:%DOCKER_PASS% ^
+                          -H "Content-Type: application/json" ^
+                          -X POST ^
+                          -d "{\\"name\\": \\"cloud-native-test-app\\", \\"is_private\\": false}" ^
+                          https://hub.docker.com/v2/repositories/%DOCKER_USER%/
+                        """
+
+                        // --- PUSH IMAGE ---
+                        echo "🚀 Pushing image to Docker Hub..."
+                        bat "docker push ${dynamicImage}:${IMAGE_TAG}"
+
+                        // --- UPDATE ENV VARIABLE FOR LATER STAGES ---
+                        env.DOCKER_IMAGE = dynamicImage
                     }
                 }
             }
         }
 
-        stage('4. Helm Lint') {
+        stage('3. Helm Lint') {
             steps {
                 dir('helm/app-chart') {
                     bat "helm lint ."
@@ -73,9 +89,10 @@ pipeline {
             }
         }
 
-        stage('5. Deploy Observability & App (ELK Stack)') {
+        stage('4. Deploy Observability & App (ELK Stack)') {
             steps {
                 withEnv(['KUBECONFIG=C:\\Users\\aksha\\.kube\\config']) {
+
                     echo "--- Ensuring Namespace ---"
                     bat "kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
 
@@ -120,7 +137,7 @@ pipeline {
                     echo "--- Deploying Application ---"
                     bat """
                     helm upgrade --install test-app-release ${HELM_CHART_PATH} ^
-                    --set image.repository=${DOCKER_IMAGE} ^
+                    --set image.repository=${env.DOCKER_IMAGE} ^
                     --set image.tag=${IMAGE_TAG} ^
                     -n ${NAMESPACE} ^
                     --wait --timeout 5m
