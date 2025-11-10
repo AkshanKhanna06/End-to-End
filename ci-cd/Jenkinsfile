@@ -93,10 +93,16 @@ pipeline {
 
                     // Detect stale or broken cluster
                     if (status.contains("ssh: handshake failed") || status.contains("does not exist") || !status.contains("Running")) {
-                        echo "⚠️ Detected broken Minikube profile — cleaning it up..."
+                        echo "⚠️ Detected broken Minikube profile — cleaning it up safely..."
                         bat """
                         minikube delete --all --purge || echo 'Nothing to delete'
-                        rmdir /S /Q "%USERPROFILE%\\.minikube\\profiles\\minikube" 2>nul || echo 'No old profiles'
+                        if exist "%USERPROFILE%\\.minikube\\profiles\\minikube" (
+                            rmdir /S /Q "%USERPROFILE%\\.minikube\\profiles\\minikube" 2>nul
+                            echo '🧹 Old Minikube profile removed.'
+                        ) else (
+                            echo '✅ No old profiles found.'
+                        )
+                        exit /b 0
                         """
                     }
 
@@ -219,8 +225,11 @@ pipeline {
                     bat "kubectl delete namespace ${NAMESPACE} --ignore-not-found"
 
                     echo "🧨 Stopping and deleting Minikube cluster..."
-                    bat "minikube stop || echo 'Minikube not running'"
-                    bat "minikube delete --all --purge || echo 'No clusters to delete'"
+                    bat """
+                    minikube stop || echo 'Minikube not running'
+                    minikube delete --all --purge || echo 'No clusters to delete'
+                    exit /b 0
+                    """
 
                     echo "✅ Full cleanup complete."
                 }
@@ -241,7 +250,7 @@ pipeline {
 🕒 Started: ${env.START_TIME}
 🕓 Ended:   ${endTime}
 📦 Docker Image: ${env.DOCKER_IMAGE}:${env.IMAGE_TAG}
-☁️  Namespace: ${env.NAMESPACE}
+☁️ Namespace: ${env.NAMESPACE}
 🧭 Observation Time: ${params.OBSERVATION_MINUTES} minutes
 💥 Cleanup: Minikube cluster deleted successfully
 ✅ Status: ${currentBuild.currentResult}
