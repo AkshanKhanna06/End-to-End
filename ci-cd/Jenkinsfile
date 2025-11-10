@@ -77,7 +77,7 @@ pipeline {
             }
         }
 
-        stage('4. Kubernetes Cluster Setup & Check') {
+                stage('4. Kubernetes Cluster Setup & Check') {
             steps {
                 script {
                     echo "🔍 Checking Minikube, kubectl, and kubeconfig..."
@@ -90,26 +90,39 @@ pipeline {
                     if (!minikubeExists) error "❌ Minikube not found. Install Minikube and restart Jenkins."
                     if (!kubeconfigExists) error "❌ Jenkins kubeconfig missing. Copy Minikube config to ${env.KUBECONFIG_PATH}."
 
-                    echo "🧠 Checking if Minikube is running..."
+                    echo "🧠 Checking Minikube status..."
                     def minikubeStatus = bat(returnStdout: true, script: "minikube status || exit 0").trim()
 
                     if (!minikubeStatus.contains("Running")) {
-                        echo "⚙️ Starting Minikube cluster..."
-                        bat "minikube start --driver=docker --force"
+                        echo "⚙️ Starting a new Minikube cluster..."
+                        bat "minikube start --driver=docker --force --cpus=4 --memory=8192 --kubernetes-version=v1.31.0"
                     } else {
-                        echo "✅ Minikube already running."
+                        echo "✅ Minikube is already running."
                     }
 
-                    echo "🔗 Validating cluster connectivity..."
+                    echo "🔗 Verifying cluster connectivity..."
                     def checkCluster = bat(returnStatus: true, script: "kubectl get nodes --kubeconfig=${env.KUBECONFIG_PATH}")
+
                     if (checkCluster != 0) {
-                        error "❌ Unable to connect to Minikube cluster. Check Docker/Kubernetes setup."
+                        echo "⚠️ Cluster seems unreachable — attempting a full Minikube reset..."
+                        bat "minikube delete --all || echo 'No clusters found to delete'"
+                        bat "minikube start --driver=docker --force --cpus=4 --memory=8192 --kubernetes-version=v1.31.0"
+
+                        echo "🔁 Retesting connection..."
+                        checkCluster = bat(returnStatus: true, script: "kubectl get nodes --kubeconfig=${env.KUBECONFIG_PATH}")
+
+                        if (checkCluster != 0) {
+                            error "❌ Minikube recreation failed. Please check Docker Desktop and system resources."
+                        } else {
+                            echo "✅ Minikube recreated and ready."
+                        }
                     } else {
                         echo "✅ Cluster connectivity confirmed."
                     }
                 }
             }
         }
+
 
         stage('5. Deploy Observability Stack & Application') {
             steps {
