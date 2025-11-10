@@ -7,7 +7,7 @@ pipeline {
 
     parameters {
         credentials(name: 'DOCKER_CREDENTIALS', description: 'Select Docker Hub credentials (optional, auto-detected if empty)', required: false)
-        string(name: 'OBSERVATION_MINUTES', defaultValue: '30', description: 'Duration (in minutes) for which the environment should remain live before cleanup')
+        string(name: 'OBSERVATION_MINUTES', defaultValue: '30', description: 'How long (in minutes) the environment should stay live before auto-cleanup')
     }
 
     environment {
@@ -77,55 +77,60 @@ pipeline {
             }
         }
 
-       stage('4. Kubernetes Cluster Setup & Check') {
-    steps {
-        script {
-            echo "🔍 Checking Minikube, kubectl, and kubeconfig..."
+        stage('4. Kubernetes Cluster Setup & Check') {
+            steps {
+                script {
+                    echo "🔍 Checking Minikube, kubectl, and kubeconfig..."
 
-            def kubectlExists = bat(returnStatus: true, script: 'where kubectl') == 0
-            def minikubeExists = bat(returnStatus: true, script: 'where minikube') == 0
+                    def kubectlExists = bat(returnStatus: true, script: 'where kubectl') == 0
+                    def minikubeExists = bat(returnStatus: true, script: 'where minikube') == 0
 
-            if (!kubectlExists) error "❌ kubectl not found. Install kubectl and restart Jenkins."
-            if (!minikubeExists) error "❌ Minikube not found. Install Minikube and restart Jenkins."
+                    if (!kubectlExists) error "❌ kubectl not found. Install kubectl and restart Jenkins."
+                    if (!minikubeExists) error "❌ Minikube not found. Install Minikube and restart Jenkins."
 
-            echo "🧠 Checking Minikube status..."
-            def status = bat(returnStdout: true, script: "minikube status || exit 0").trim()
+                    echo "🧠 Checking Minikube status..."
+                    def status = bat(returnStdout: true, script: "minikube status || exit 0").trim()
 
-            // Detect stale/corrupted profile
-            if (status.contains("ssh: handshake failed") || status.contains("does not exist") || !status.contains("Running")) {
-                echo "⚠️ Detected broken Minikube profile — cleaning it up..."
-                bat """
-                minikube delete --all --purge || echo 'Nothing to delete'
-                rmdir /S /Q "%USERPROFILE%\\.minikube\\profiles\\minikube" 2>nul || echo 'No old profiles'
-                """
+                    // Detect stale or broken cluster
+                    if (status.contains("ssh: handshake failed") || status.contains("does not exist") || !status.contains("Running")) {
+                        echo "⚠️ Detected broken Minikube profile — cleaning it up..."
+                        bat """
+                        minikube delete --all --purge || echo 'Nothing to delete'
+                        rmdir /S /Q "%USERPROFILE%\\.minikube\\profiles\\minikube" 2>nul || echo 'No old profiles'
+                        """
+                    }
+
+                    echo "🚀 Starting a fresh Minikube cluster..."
+                    def startCode = bat(returnStatus: true, script: "minikube start --driver=docker --force --cpus=4 --memory=7500 --kubernetes-version=v1.34.0")
+                    if (startCode != 0) {
+                        echo "⚠️ First Minikube start failed. Retrying once..."
+                        bat "minikube delete --all --purge || echo 'Cleanup before retry'"
+                        startCode = bat(returnStatus: true, script: "minikube start --driver=docker --force --cpus=4 --memory=7500 --kubernetes-version=v1.34.0")
+                        if (startCode != 0) error "❌ Minikube failed to start after retry."
+                    }
+
+                    // --- Auto-copy kubeconfig ---
+                    def userKubePath = "${System.getenv('USERPROFILE')}\\.kube\\config"
+                    def jenkinsKubeDir = "C:\\ProgramData\\Jenkins\\.kube"
+                    def jenkinsKubePath = "${jenkinsKubeDir}\\config"
+
+                    bat """
+                    if not exist "${jenkinsKubeDir}" mkdir "${jenkinsKubeDir}"
+                    if exist "${userKubePath}" (
+                        copy /Y "${userKubePath}" "${jenkinsKubePath}"
+                        echo ✅ Copied kubeconfig to Jenkins directory.
+                    ) else (
+                        echo ⚠️ User kubeconfig not found at ${userKubePath}
+                    )
+                    """
+
+                    echo "🔗 Verifying cluster connectivity..."
+                    def checkCluster = bat(returnStatus: true, script: "kubectl get nodes --kubeconfig=${jenkinsKubePath}")
+                    if (checkCluster != 0) error "❌ Cluster unreachable after startup."
+                    else echo "✅ Cluster connectivity confirmed."
+                }
             }
-
-            echo "🚀 Starting fresh Minikube cluster..."
-            bat "minikube start --driver=docker --force --cpus=4 --memory=7500 --kubernetes-version=v1.34.0"
-
-            // --- Auto-copy kubeconfig ---
-            def userKubePath = "${System.getenv('USERPROFILE')}\\.kube\\config"
-            def jenkinsKubeDir = "C:\\ProgramData\\Jenkins\\.kube"
-            def jenkinsKubePath = "${jenkinsKubeDir}\\config"
-
-            bat """
-            if not exist "${jenkinsKubeDir}" mkdir "${jenkinsKubeDir}"
-            if exist "${userKubePath}" (
-                copy /Y "${userKubePath}" "${jenkinsKubePath}"
-                echo ✅ Copied kubeconfig to Jenkins directory.
-            ) else (
-                echo ⚠️ User kubeconfig not found at ${userKubePath}
-            )
-            """
-
-            echo "🔗 Verifying cluster connectivity..."
-            def checkCluster = bat(returnStatus: true, script: "kubectl get nodes --kubeconfig=${jenkinsKubePath}")
-            if (checkCluster != 0) error "❌ Cluster unreachable after clean start."
-            else echo "✅ Cluster connectivity confirmed."
         }
-    }
-}
-
 
         stage('5. Deploy Observability Stack & Application') {
             steps {
@@ -196,7 +201,7 @@ pipeline {
 
         stage('6. Observation Window (Configurable)') {
             steps {
-                echo "⏳ Environment is live for ${params.OBSERVATION_MINUTES} minutes..."
+                echo "⏳ Environment will stay live for ${params.OBSERVATION_MINUTES} minutes..."
                 sleep(time: params.OBSERVATION_MINUTES.toInteger(), unit: "MINUTES")
             }
         }
@@ -215,7 +220,7 @@ pipeline {
 
                     echo "🧨 Stopping and deleting Minikube cluster..."
                     bat "minikube stop || echo 'Minikube not running'"
-                    bat "minikube delete --all || echo 'No clusters to delete'"
+                    bat "minikube delete --all --purge || echo 'No clusters to delete'"
 
                     echo "✅ Full cleanup complete."
                 }
