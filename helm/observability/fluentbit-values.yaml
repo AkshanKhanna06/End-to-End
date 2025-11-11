@@ -1,0 +1,23 @@
+image:
+  repository: cr.fluentbit.io/fluent/fluent-bit
+  tag: 3.1.4
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"
+    cpu: "200m"
+
+backend:
+  type: es
+  es:
+    host: elasticsearch-master
+    port: 9200
+    logstash_format: true
+    replace_dots: true

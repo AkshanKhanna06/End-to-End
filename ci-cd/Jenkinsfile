@@ -91,43 +91,22 @@ pipeline {
                     echo "🧠 Checking Minikube status..."
                     def status = bat(returnStdout: true, script: "minikube status || exit 0").trim()
 
-                    // Detect stale or broken cluster
-                    if (status.contains("ssh: handshake failed") || status.contains("does not exist") || !status.contains("Running")) {
+                    if (status.contains("does not exist") || !status.contains("Running")) {
                         echo "⚠️ Detected broken Minikube profile — cleaning it up safely..."
-                        bat """
-                        minikube delete --all --purge || echo 'Nothing to delete'
-                        if exist "%USERPROFILE%\\.minikube\\profiles\\minikube" (
-                            rmdir /S /Q "%USERPROFILE%\\.minikube\\profiles\\minikube" 2>nul
-                            echo '🧹 Old Minikube profile removed.'
-                        ) else (
-                            echo '✅ No old profiles found.'
-                        )
-                        exit /b 0
-                        """
+                        bat "minikube delete --all --purge || echo 'Nothing to delete'"
                     }
 
                     echo "🚀 Starting a fresh Minikube cluster..."
                     def startCode = bat(returnStatus: true, script: "minikube start --driver=docker --force --cpus=4 --memory=11000 --kubernetes-version=v1.34.0")
-                    if (startCode != 0) {
-                        echo "⚠️ First Minikube start failed. Retrying once..."
-                        bat "minikube delete --all --purge || echo 'Cleanup before retry'"
-                        startCode = bat(returnStatus: true, script: "minikube start --driver=docker --force --cpus=4 --memory=11000 --kubernetes-version=v1.34.0")
-                        if (startCode != 0) error "❌ Minikube failed to start after retry."
-                    }
+                    if (startCode != 0) error "❌ Minikube failed to start."
 
-                    // --- Auto-copy kubeconfig ---
                     def userKubePath = "${env.USERPROFILE}\\.kube\\config"
                     def jenkinsKubeDir = "C:\\ProgramData\\Jenkins\\.kube"
                     def jenkinsKubePath = "${jenkinsKubeDir}\\config"
 
                     bat """
                     if not exist "${jenkinsKubeDir}" mkdir "${jenkinsKubeDir}"
-                    if exist "${userKubePath}" (
-                        copy /Y "${userKubePath}" "${jenkinsKubePath}"
-                        echo ✅ Copied kubeconfig to Jenkins directory.
-                    ) else (
-                        echo ⚠️ User kubeconfig not found at ${userKubePath}
-                    )
+                    if exist "${userKubePath}" copy /Y "${userKubePath}" "${jenkinsKubePath}"
                     """
 
                     echo "🔗 Verifying cluster connectivity..."
@@ -147,7 +126,7 @@ pipeline {
 
                     echo "--- Adding Helm Repositories ---"
                     bat "helm repo add elastic https://helm.elastic.co --force-update"
-                    bat "helm repo add bitnami https://charts.bitnami.com/bitnami --force-update"
+                    bat "helm repo add fluent https://fluent.github.io/helm-charts --force-update"
                     bat "helm repo add grafana https://grafana.github.io/helm-charts --force-update"
                     bat "helm repo update"
 
@@ -159,10 +138,10 @@ pipeline {
                     --wait --timeout 10m
                     """
 
-                    echo "--- Deploying Fluentd ---"
+                    echo "--- Deploying Fluent Bit (instead of Fluentd) ---"
                     bat """
-                    helm upgrade --install fluentd bitnami/fluentd ^
-                    -f helm/observability/fluentd-values.yaml ^
+                    helm upgrade --install fluent-bit fluent/fluent-bit ^
+                    -f helm/observability/fluentbit-values.yaml ^
                     -n ${NAMESPACE} ^
                     --wait --timeout 5m
                     """
@@ -219,17 +198,14 @@ pipeline {
 
                     bat "helm uninstall test-app-release -n ${NAMESPACE} || echo 'App not found'"
                     bat "helm uninstall kibana -n ${NAMESPACE} || echo 'Kibana not found'"
-                    bat "helm uninstall fluentd -n ${NAMESPACE} || echo 'Fluentd not found'"
+                    bat "helm uninstall fluent-bit -n ${NAMESPACE} || echo 'Fluent Bit not found'"
                     bat "helm uninstall elasticsearch -n ${NAMESPACE} || echo 'Elasticsearch not found'"
                     bat "helm uninstall grafana -n ${NAMESPACE} || echo 'Grafana not found'"
                     bat "kubectl delete namespace ${NAMESPACE} --ignore-not-found"
 
                     echo "🧨 Stopping and deleting Minikube cluster..."
-                    bat """
-                    minikube stop || echo 'Minikube not running'
-                    minikube delete --all --purge || echo 'No clusters to delete'
-                    exit /b 0
-                    """
+                    bat "minikube stop || echo 'Minikube not running'"
+                    bat "minikube delete --all --purge || echo 'No clusters to delete'"
 
                     echo "✅ Full cleanup complete."
                 }
