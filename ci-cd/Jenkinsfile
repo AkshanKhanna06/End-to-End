@@ -33,22 +33,9 @@ pipeline {
         stage('2. Build & Push Docker Image') {
             steps {
                 script {
-                    def dockerCred = params.DOCKER_CREDENTIALS
-                    if (!dockerCred) {
-                        def creds = Jenkins.instance
-                            .getExtensionList('com.cloudbees.plugins.credentials.SystemCredentialsProvider')[0]
-                            .getCredentials()
-                        def match = creds.find { it.description?.toLowerCase()?.contains('docker') || it.id?.toLowerCase()?.contains('docker') }
-                        dockerCred = match?.id
-                        if (!dockerCred) {
-                            error "❌ No Docker credentials found in Jenkins. Please add or select one."
-                        } else {
-                            echo "✅ Auto-detected Docker credentials: ${dockerCred}"
-                        }
-                    }
-
+                    // Directly use credentials set in Jenkins (no getInstance)
                     withCredentials([usernamePassword(
-                        credentialsId: dockerCred,
+                        credentialsId: 'docker-hub-creds', // replace with your actual ID in Jenkins
                         usernameVariable: 'DOCKER_USER',
                         passwordVariable: 'DOCKER_PASS'
                     )]) {
@@ -66,7 +53,7 @@ pipeline {
                         docker login -u %DOCKER_USER% -p %DOCKER_PASS%
                         """
 
-                        echo "🚀 Pushing Docker image to Docker Hub..."
+                        echo "🚀 Pushing Docker image..."
                         bat "docker push ${dynamicImage}:${IMAGE_TAG}"
 
                         env.DOCKER_IMAGE = dynamicImage
@@ -75,6 +62,7 @@ pipeline {
                 }
             }
         }
+
 
         stage('3. Helm Lint') {
             steps {
