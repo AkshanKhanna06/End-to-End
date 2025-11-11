@@ -107,11 +107,11 @@ pipeline {
                     }
 
                     echo "🚀 Starting a fresh Minikube cluster..."
-                    def startCode = bat(returnStatus: true, script: "minikube start --driver=docker --force --cpus=4 --memory=7500 --kubernetes-version=v1.34.0")
+                    def startCode = bat(returnStatus: true, script: "minikube start --driver=docker --force --cpus=4 --memory=11000 --kubernetes-version=v1.34.0")
                     if (startCode != 0) {
                         echo "⚠️ First Minikube start failed. Retrying once..."
                         bat "minikube delete --all --purge || echo 'Cleanup before retry'"
-                        startCode = bat(returnStatus: true, script: "minikube start --driver=docker --force --cpus=4 --memory=7500 --kubernetes-version=v1.34.0")
+                        startCode = bat(returnStatus: true, script: "minikube start --driver=docker --force --cpus=4 --memory=11000 --kubernetes-version=v1.34.0")
                         if (startCode != 0) error "❌ Minikube failed to start after retry."
                     }
 
