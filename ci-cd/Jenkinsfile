@@ -116,7 +116,7 @@ pipeline {
                     }
 
                     // --- Auto-copy kubeconfig ---
-                    def userKubePath = "${System.getenv('USERPROFILE')}\\.kube\\config"
+                    def userKubePath = "${env.USERPROFILE}\\.kube\\config"
                     def jenkinsKubeDir = "C:\\ProgramData\\Jenkins\\.kube"
                     def jenkinsKubePath = "${jenkinsKubeDir}\\config"
 
