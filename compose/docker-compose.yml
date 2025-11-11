@@ -1,0 +1,66 @@
+version: '3.9'
+
+services:
+  # ------------- YOUR APPLICATION -------------
+  app:
+    image: akkicasm06/cloud-native-test-app:latest
+    container_name: cloud-app
+    ports:
+      - "8080:8080"
+    depends_on:
+      - elasticsearch
+    environment:
+      - NODE_ENV=production
+    logging:
+      driver: "json-file"
+
+  # ------------- ELASTICSEARCH -------------
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200 || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+
+  # ------------- KIBANA -------------
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.0
+    container_name: kibana
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+
+  # ------------- FLUENT BIT -------------
+  fluent-bit:
+    image: cr.fluentbit.io/fluent/fluent-bit:3.1.4
+    container_name: fluent-bit
+    volumes:
+      - ./fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    depends_on:
+      - elasticsearch
+    command: ["fluent-bit", "-c", "/fluent-bit/etc/fluent-bit.conf"]
+
+  # ------------- GRAFANA -------------
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - elasticsearch
+    restart: always

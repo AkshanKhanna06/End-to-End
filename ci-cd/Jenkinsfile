@@ -1,216 +1,72 @@
-import jenkins.model.*
-import com.cloudbees.plugins.credentials.*
-import com.cloudbees.plugins.credentials.domains.*
-
 pipeline {
     agent any
 
-    parameters {
-        credentials(name: 'DOCKER_CREDENTIALS', description: 'Select Docker Hub credentials (optional, auto-detected if empty)', required: false)
-        string(name: 'OBSERVATION_MINUTES', defaultValue: '30', description: 'How long (in minutes) the environment should stay live before auto-cleanup')
-    }
-
     environment {
-        IMAGE_TAG        = "${env.BUILD_ID}"
-        HELM_CHART_PATH  = "helm/app-chart"
-        NAMESPACE        = "observability"
-        KUBECONFIG_PATH  = "C:\\ProgramData\\Jenkins\\.kube\\config"
-        SUMMARY_FILE     = "pipeline_summary.txt"
-        START_TIME       = ""
+        DOCKER_IMAGE = "akkicasm06/cloud-native-test-app"
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
+        COMPOSE_PATH = "compose"
     }
 
     stages {
-
-        stage('1. Code Checkout') {
+        stage('1. Checkout') {
             steps {
-                script {
-                    env.START_TIME = new Date().format("yyyy-MM-dd HH:mm:ss")
-                    echo "✅ Code checkout done at ${env.START_TIME}"
+                echo "✅ Checking out code"
+            }
+        }
+
+        stage('2. Build Docker Image') {
+            steps {
+                dir('test-app') {
+                    bat "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} ."
                 }
             }
         }
 
-        stage('2. Build & Push Docker Image') {
+        stage('3. Push to Docker Hub') {
             steps {
-                script {
-                    withCredentials([usernamePassword(
-                        credentialsId: 'docker-hub-creds', // Replace with your Jenkins credential ID
-                        usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASS'
-                    )]) {
-
-                        def dynamicImage = "${DOCKER_USER}/cloud-native-test-app"
-                        echo "🧩 Using Docker repository: ${dynamicImage}"
-
-                        dir('test-app') {
-                            bat "docker build -t ${dynamicImage}:${IMAGE_TAG} ."
-                        }
-
-                        echo "🔐 Logging into Docker Hub..."
-                        bat """
-                        docker logout || echo "no previous login"
-                        docker login -u %DOCKER_USER% -p %DOCKER_PASS%
-                        """
-
-                        echo "🚀 Pushing Docker image..."
-                        bat "docker push ${dynamicImage}:${IMAGE_TAG}"
-
-                        env.DOCKER_IMAGE = dynamicImage
-                        echo "✅ Docker image pushed successfully: ${dynamicImage}:${IMAGE_TAG}"
-                    }
+                withCredentials([usernamePassword(credentialsId: 'docker-hub-creds', 
+                                                 usernameVariable: 'DOCKER_USER',
+                                                 passwordVariable: 'DOCKER_PASS')]) {
+                    echo "🔐 Logging into Docker Hub..."
+                    bat "echo %DOCKER_PASS% | docker login -u %DOCKER_USER% --password-stdin"
+                    bat "docker push ${DOCKER_IMAGE}:${IMAGE_TAG}"
+                    bat "docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${DOCKER_IMAGE}:latest"
+                    bat "docker push ${DOCKER_IMAGE}:latest"
                 }
             }
         }
 
-        stage('3. Helm Lint') {
+        stage('4. Deploy via Docker Compose') {
             steps {
-                dir('helm/app-chart') {
-                    bat "helm lint ."
+                dir("${COMPOSE_PATH}") {
+                    echo "🚀 Starting Observability Stack + App..."
+                    bat "docker compose down || echo nothing_to_down"
+                    bat "docker compose up -d"
                 }
             }
         }
 
-        // ✅ Updated Stage 4 — Uses existing Minikube cluster instead of starting a new one
-        stage('4. Kubernetes Cluster Setup & Check') {
+        stage('5. Verify Containers') {
             steps {
-                script {
-                    echo "🔍 Checking existing Minikube and kubeconfig..."
+                bat "docker ps"
+                echo """
+✅ Deployment complete.
 
-                    def kubectlExists = bat(returnStatus: true, script: 'where kubectl') == 0
-                    def minikubeExists = bat(returnStatus: true, script: 'where minikube') == 0
-                    if (!kubectlExists) error "❌ kubectl not found. Install kubectl and restart Jenkins."
-                    if (!minikubeExists) error "❌ Minikube not found. Install Minikube and restart Jenkins."
-
-                    def userKubePath = "C:\\Users\\aksha\\.kube\\config"
-                    def jenkinsKubeDir = "C:\\ProgramData\\Jenkins\\.kube"
-                    def jenkinsKubePath = "${jenkinsKubeDir}\\config"
-
-                    bat """
-                    if not exist "${jenkinsKubeDir}" mkdir "${jenkinsKubeDir}"
-                    if exist "${userKubePath}" (
-                        copy /Y "${userKubePath}" "${jenkinsKubePath}"
-                        echo ✅ Copied kubeconfig from user profile to Jenkins.
-                    ) else (
-                        echo ⚠️ User kubeconfig not found at ${userKubePath}
-                    )
-                    """
-
-                    echo "🔗 Verifying cluster connectivity..."
-                    def checkCluster = bat(returnStatus: true, script: "kubectl get nodes --kubeconfig=${jenkinsKubePath}")
-                    if (checkCluster != 0) {
-                        error "❌ Cluster unreachable. Please ensure Minikube is running under your user (run 'minikube status')."
-                    } else {
-                        echo "✅ Cluster connectivity confirmed and ready."
-                    }
-                }
-            }
-        }
-
-        stage('5. Deploy Observability Stack & App') {
-            steps {
-                withEnv(["KUBECONFIG=${env.KUBECONFIG_PATH}"]) {
-                    echo "🚀 Deploying Observability Stack + Application..."
-
-                    bat "kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f - --validate=false"
-
-                    echo "--- Adding Helm Repositories ---"
-                    bat "helm repo add elastic https://helm.elastic.co --force-update"
-                    bat "helm repo add fluent https://fluent.github.io/helm-charts --force-update"
-                    bat "helm repo add grafana https://grafana.github.io/helm-charts --force-update"
-                    bat "helm repo update"
-
-                    echo "--- Deploying Elasticsearch ---"
-                    bat """
-                    helm upgrade --install elasticsearch elastic/elasticsearch ^
-                    -f helm/observability/elasticsearch-values.yaml ^
-                    -n ${NAMESPACE} ^
-                    --wait --timeout 10m
-                    """
-
-                    echo "--- Deploying Fluent Bit ---"
-                    bat """
-                    helm upgrade --install fluent-bit fluent/fluent-bit ^
-                    -f helm/observability/fluentbit-values.yaml ^
-                    -n ${NAMESPACE} ^
-                    --wait --timeout 5m
-                    """
-
-                    echo "--- Deploying Kibana ---"
-                    bat """
-                    helm upgrade --install kibana elastic/kibana ^
-                    -f helm/observability/kibana-values.yaml ^
-                    -n ${NAMESPACE} ^
-                    --wait --timeout 5m
-                    """
-
-                    echo "--- Deploying Grafana ---"
-                    bat """
-                    helm upgrade --install grafana grafana/grafana ^
-                    -f helm/observability/grafana-values.yaml ^
-                    -n ${NAMESPACE} ^
-                    --wait --timeout 5m
-                    """
-
-                    echo "--- Deploying Application ---"
-                    bat """
-                    helm upgrade --install test-app-release ${HELM_CHART_PATH} ^
-                    --set image.repository=${env.DOCKER_IMAGE} ^
-                    --set image.tag=${IMAGE_TAG} ^
-                    -n ${NAMESPACE} ^
-                    --wait --timeout 5m
-                    """
-
-                    echo "--- ✅ Deployment Complete ---"
-                    bat "kubectl get pods -n ${NAMESPACE}"
-                }
-            }
-        }
-
-        stage('6. Observation Window') {
-            steps {
-                echo "⏳ Keeping environment live for ${params.OBSERVATION_MINUTES} minutes..."
-                sleep(time: params.OBSERVATION_MINUTES.toInteger(), unit: "MINUTES")
-            }
-        }
-
-        stage('7. Full Cleanup') {
-            steps {
-                withEnv(["KUBECONFIG=${env.KUBECONFIG_PATH}"]) {
-                    echo "🧹 Cleaning up Helm releases and namespace (skipping Minikube deletion)..."
-
-                    bat "helm uninstall test-app-release -n ${NAMESPACE} || echo 'App not found'"
-                    bat "helm uninstall kibana -n ${NAMESPACE} || echo 'Kibana not found'"
-                    bat "helm uninstall fluent-bit -n ${NAMESPACE} || echo 'Fluent Bit not found'"
-                    bat "helm uninstall elasticsearch -n ${NAMESPACE} || echo 'Elasticsearch not found'"
-                    bat "helm uninstall grafana -n ${NAMESPACE} || echo 'Grafana not found'"
-                    bat "kubectl delete namespace ${NAMESPACE} --ignore-not-found"
-                    echo "✅ Cleanup complete (Minikube left running)."
-                }
-            }
-        }
-
-        stage('8. Generate Summary Report') {
-            steps {
-                script {
-                    def endTime = new Date().format("yyyy-MM-dd HH:mm:ss")
-                    def summary = """
-──────────────────────────────────────────────
-📘 PIPELINE SUMMARY
-──────────────────────────────────────────────
-👤 User: ${currentBuild.getBuildCauses()[0].userName ?: "Manual Trigger"}
-🏁 Build ID: ${env.BUILD_ID}
-🕒 Started: ${env.START_TIME}
-🕓 Ended:   ${endTime}
-📦 Docker Image: ${env.DOCKER_IMAGE}:${env.IMAGE_TAG}
-☁️ Namespace: ${env.NAMESPACE}
-🧭 Observation Time: ${params.OBSERVATION_MINUTES} minutes
-✅ Status: ${currentBuild.currentResult}
-──────────────────────────────────────────────
+Access:
+- App:        http://localhost:8080
+- Kibana:     http://localhost:5601
+- Grafana:    http://localhost:3000
 """
-                    writeFile file: env.SUMMARY_FILE, text: summary
-                    echo summary
-                    archiveArtifacts artifacts: env.SUMMARY_FILE, onlyIfSuccessful: true
+            }
+        }
+
+        stage('6. Optional Cleanup') {
+            steps {
+                input message: 'Do you want to stop all containers?', ok: 'Yes, Clean Up'
+                dir("${COMPOSE_PATH}") {
+                    bat "docker compose down"
                 }
+                echo "🧹 Containers stopped and cleaned up."
             }
         }
     }
