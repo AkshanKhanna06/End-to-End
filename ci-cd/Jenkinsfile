@@ -2,6 +2,7 @@ pipeline {
     agent any
 
     parameters {
+        // I've kept CLEANUP but modified Stage 6 to always run after the wait.
         booleanParam(name: 'CLEANUP', defaultValue: false, description: 'Stop and remove containers after build')
     }
 
@@ -39,19 +40,13 @@ pipeline {
             }
         }
 
-        stage('4. Verify Running Containers') {
+        stage('4. Open Application & Dashboards') {
             steps {
                 script {
-                    echo "🔍 Checking running containers..."
-                    bat 'docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"'
-                }
-            }
-        }
-
-        stage('5. Open Application & Dashboards') {
-            steps {
-                script {
-                    echo "🌐 Opening application and dashboards..."
+                    echo "🔍 Checking running containers and opening dashboards..."
+                    bat 'docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"' // Combined verification
+                    
+                    // Opening the URLs (Note: 'start' command is Windows-specific/interactive)
                     bat """
                     start http://localhost:8085
                     start http://localhost:3000
@@ -65,14 +60,30 @@ pipeline {
                 }
             }
         }
-
-        stage('6. Optional Cleanup') {
-            when {
-                expression { return params.CLEANUP == true }
+        
+        // 🌟 NEW STAGE: Waits for 15 minutes before proceeding
+        stage('5. Wait for Testing (15 mins)') {
+            steps {
+                script {
+                    echo "⏳ Stack is running for 15 minutes. Check application and dashboards now."
+                    
+                    // Use timeout to run a long action. This ensures Jenkins doesn't hang forever.
+                    timeout(time: 15, unit: 'MINUTES') {
+                        // sleep command pauses the execution for 900 seconds (15 minutes)
+                        sleep(900)
+                    }
+                    
+                    echo "⏱ 15 minutes passed. Proceeding to cleanup."
+                }
             }
+        }
+
+        // 🌟 MODIFIED STAGE: Renamed and modified to run automatically
+        stage('6. Automatic Cleanup') {
             steps {
                 dir("${COMPOSE_PATH}") {
-                    echo "🧹 Cleaning up stack..."
+                    echo "🧹 Automatically cleaning up stack..."
+                    // The -v flag ensures volumes are removed, which is a thorough cleanup.
                     bat "docker compose down -v"
                 }
             }
@@ -81,7 +92,7 @@ pipeline {
 
     post {
         always {
-            echo "🏁 Pipeline finished successfully (or skipped cleanup)."
+            echo "🏁 Pipeline finished. All resources have been cleaned up."
         }
     }
 }
